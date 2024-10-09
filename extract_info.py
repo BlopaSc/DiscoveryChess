@@ -54,18 +54,29 @@ def parse_original_sourcefiles():
             out.write(zlib.compress(bytes('\n'.join(games_list), encoding='utf-8'), level=9))
             print(f"Compressed successfully, Time taken: {time.time() - stime}")
 
-def load_games():
-    games = {}
-    for year in years:
-        games_list = []
+def filter_games(game_str, exclude_draws = False, checkmates_only = False):
+    if exclude_draws and game_str[0] == 'D':
+        return False
+    if checkmates_only and game_str[-1] != '#':
+        return False
+    return True
+
+def load_games(as_single_array = False, exclude_draws = False, checkmates_only = False):
+    if as_single_array:
+        games = []
+    else:
+        games = {}
+    for year in years[::-1]: # Largest tend to be the newer ones, this way we go easier on the memory
         file_path = f'./Dataset/dbLumbrasGigaBase{year}.bin'
         if not os.path.exists(file_path):
             print("Failed to find file:", file_path)
             continue
         with open(file_path, 'rb') as binfile:
             read_file = zlib.decompress(binfile.read()).decode('utf-8')
-            games_list = read_file.split('\n')
-            games[year[1:]] = [({'W': 1, 'B': -1, 'D': 0}[g[0]], g[1:]) for g in games_list]
+            if as_single_array:
+                games += [({'W': 1, 'B': -1, 'D': 0}[g[0]], g[1:]) for g in read_file.split('\n') if filter_games(g, exclude_draws, checkmates_only)]
+            else:
+                games[year[1:]] = [({'W': 1, 'B': -1, 'D': 0}[g[0]], g[1:]) for g in read_file.split('\n') if filter_games(g, exclude_draws, checkmates_only)]
     return games
 
 if __name__ == "__main__":

@@ -86,18 +86,18 @@ class Chess:
         self.last_update = self.turn_counter
         if self.turn == Chess.WHITE:
             self.king = self.wking
-            self.back_file = 0
-            self.pawn_file = 1
-            self.en_passant_file = 4
-            self.end_file = 7
+            self.back_rank = 0
+            self.pawn_rank = 1
+            self.en_passant_rank = 4
+            self.end_rank = 7
             self.dy = 1
             self.enemy_color = Chess.BLACK
         else:
             self.king = self.bking
-            self.back_file = 7
-            self.pawn_file = 6
-            self.en_passant_file = 3
-            self.end_file = 0
+            self.back_rank = 7
+            self.pawn_rank = 6
+            self.en_passant_rank = 3
+            self.end_rank = 0
             self.dy = -1
             self.enemy_color = Chess.WHITE
         self.attacked_cells, self.fixed_cells, self.attacker_pieces = self.get_attacked(self.enemy_color)
@@ -216,19 +216,19 @@ class Chess:
         for dx in (-1,1):
             npos = (y+self.dy, x+dx)
             if self.valid_position(npos) and self.state[npos] & self.enemy_color:
-                if npos[0] != self.end_file:
+                if npos[0] != self.end_rank:
                     actions.append( (Chess.MOVE, position, npos) )
                 else:
                     for promotion in (Chess.KNIGHT, Chess.QUEEN): actions.append( (Chess.PROMOTION, position, npos, promotion) )
         # Gets en passant attack option
-        if self.enpassant and y == self.en_passant_file and abs(x-self.enpassant[1])==1:
+        if self.enpassant and y == self.en_passant_rank and abs(x-self.enpassant[1])==1:
             actions.append( (Chess.ENPASSANT, position, self.enpassant) )
         # Gets pawn move options
-        if y + self.dy != self.end_file:
+        if y + self.dy != self.end_rank:
             if not self.state[y+self.dy, x]:
                 actions.append( (Chess.MOVE, position, (y+self.dy, x)) )
                 # Gets pawn long move for initial line
-                if (y == self.pawn_file and not self.state[y+(2*self.dy), x]):
+                if (y == self.pawn_rank and not self.state[y+(2*self.dy), x]):
                     actions.append( (Chess.LONGMOVE, position, (y+(2*self.dy), x)) )
         else:
             # Promotion of pawns
@@ -258,10 +258,10 @@ class Chess:
                 actions.append( (Chess.MOVEKING, position, npos) )
         # Get special castling move: King nor tower has moved, spaces are empty, king is not on check, nor ending positions for tower and king are on check
         if self.state[position] & Chess.NOT_MOVED and not self.attacker_pieces:
-            if self.state[self.back_file, 0] & Chess.NOT_MOVED and np.sum(self.state[self.back_file, 1:4]) == 0 and not (self.back_file, 2) in self.attacked_cells and not (self.back_file, 3) in self.attacked_cells:
-                actions.append( (Chess.CASTLING, position, (self.back_file, 2)) )
-            if self.state[self.back_file, 7] & Chess.NOT_MOVED and np.sum(self.state[self.back_file, 5:7]) == 0 and not (self.back_file, 5) in self.attacked_cells and not (self.back_file, 6) in self.attacked_cells:
-                actions.append( (Chess.CASTLING, position, (self.back_file, 6)) )
+            if self.state[self.back_rank, 0] & Chess.NOT_MOVED and np.sum(self.state[self.back_rank, 1:4]) == 0 and not (self.back_rank, 2) in self.attacked_cells and not (self.back_rank, 3) in self.attacked_cells:
+                actions.append( (Chess.CASTLING, position, (self.back_rank, 2)) )
+            if self.state[self.back_rank, 7] & Chess.NOT_MOVED and np.sum(self.state[self.back_rank, 5:7]) == 0 and not (self.back_rank, 5) in self.attacked_cells and not (self.back_rank, 6) in self.attacked_cells:
+                actions.append( (Chess.CASTLING, position, (self.back_rank, 6)) )
                 
     # Returns a list of actions available to the player
     def get_available_actions(self):
@@ -437,4 +437,3 @@ if __name__ == "__main__":
         game.do_action_algebraic(act, check=True)
         print("State:\n" + str(game))
     print("End state:", game.has_ended())
-    
