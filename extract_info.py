@@ -11,6 +11,8 @@ import zlib
 
 years = [' -1899', ' 1900-1949', ' 1950-1969', ' 1970-1989', ' 1990-1999', ' 2000-2004', ' 2005-2009', ' 2010-2014', ' 2015-2019', ' 2020', ' 2021', ' 2022', ' 2023']
 
+# Process the original pgn datasets storing them as a compressed text file in which each line represents a game.
+# The first character of each line specifies the winner of the match (W/D/B) and then all the game moves are written separated by commas
 def parse_original_sourcefiles():
     stime = time.time()
     for year in years:
@@ -54,6 +56,9 @@ def parse_original_sourcefiles():
             out.write(zlib.compress(bytes('\n'.join(games_list), encoding='utf-8'), level=9))
             print(f"Compressed successfully, Time taken: {time.time() - stime}")
 
+# Returns true or false depending if a game should be included or not in the collection
+# Exclude draws makes games that end up in a tie to be excluded
+# Checkmates only makes games that did not ended in a checkmate (surrender/draw) to be excluded
 def filter_games(game_str, exclude_draws = False, checkmates_only = False):
     if exclude_draws and game_str[0] == 'D':
         return False
@@ -61,6 +66,7 @@ def filter_games(game_str, exclude_draws = False, checkmates_only = False):
         return False
     return True
 
+# Loads the games from the compressed text files into memory, storing them as in an array (or dictionary of arrays) of (int, str) items, where int specifies the winner and str the string representing the game
 def load_games(as_single_array = False, exclude_draws = False, checkmates_only = False):
     if as_single_array:
         games = []
@@ -78,6 +84,19 @@ def load_games(as_single_array = False, exclude_draws = False, checkmates_only =
             else:
                 games[year[1:]] = [({'W': 1, 'B': -1, 'D': 0}[g[0]], g[1:]) for g in read_file.split('\n') if filter_games(g, exclude_draws, checkmates_only)]
     return games
+
+# Converts a game string (comma separated actions) into a pgn string
+def to_pgn(game_str):
+    counter = 1
+    moves = 0
+    out = ''
+    for move in game_str.split(','):
+        if moves % 2 == 0:
+            out += f'{counter}.'
+            counter += 1
+        moves += 1
+        out += move + ' '
+    return out
 
 if __name__ == "__main__":
     print("Parsing files")
