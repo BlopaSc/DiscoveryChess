@@ -5,6 +5,7 @@
 
 import numpy as np
 import time
+import torch
 from typing import *
 
 class Chess:
@@ -24,6 +25,9 @@ class Chess:
     PIECE_DATA = 0xFF
     # Extra data
     NOT_MOVED = 0x100
+    
+    # Chess pieces as index
+    PIECE_INDEX = {PAWN: 0, KNIGHT: 1, BISHOP: 2, ROOK: 3, QUEEN: 4, KING: 5}
     
     # Movement type
     MOVE = 1
@@ -431,6 +435,36 @@ class Chess:
         arr = [self.pos_as_notation(pos) for pos in positions]
         arr.sort()
         return ' '.join(arr)
+    
+    # Returns the current state as a tuple of tensors (board, state)
+        # board: is an 12x8x8 tensor filled with 1s and 0s depending on whether a piece is present at a given cell
+            # Each layer represents a unique type of piece from the board: pawn, knight, bishop, rook, queen and king; each for a specific color
+        # state: is a 22-value vector which the current state of the game that cannot be read from the board
+            # value 0-1: whether it is the white or black player's turn
+            # value 2-3: whether it is still possible to perform a castling on the white king's/queen's side
+            # value 4-5: whether it is still possible to perform a castling on the black king's/queen's side
+            # value 6-13: whether the white player can perform an en-passant capture for each of the 8 files (columns)
+            # value 14-21: whether the black player can perform an en-passant capture for each of the 8 files (columns)
+    def to_tensor(self):
+        board = torch.zeros((12,8,8))
+        state = torch.zeros((22,))
+        for pos in ((i,j) for i in range(8) for j in range(8)):
+            if self.state[pos]:
+                offset = 0 if self.state[pos] & Chess.WHITE else 6
+                offset += Chess.PIECE_INDEX[self.state[pos] & Chess.PIECE]
+                board[offset, *pos] = 1.0
+        if self.turn == Chess.WHITE:
+            state[0] = 1
+        else:
+            state[1] = 1
+        if (self.state[0,4] & Chess.NOT_MOVED) and (self.state[0,7] & Chess.NOT_MOVED): state[2] = 1
+        if (self.state[0,4] & Chess.NOT_MOVED) and (self.state[0,0] & Chess.NOT_MOVED): state[3] = 1
+        if (self.state[7,4] & Chess.NOT_MOVED) and (self.state[7,7] & Chess.NOT_MOVED): state[4] = 1
+        if (self.state[7,4] & Chess.NOT_MOVED) and (self.state[7,7] & Chess.NOT_MOVED): state[5] = 1
+        if self.enpassant:
+            offset = 6 if self.turn == Chess.WHITE else 14
+            state[offset + self.enpassant[1]] = 1
+        return (board,state)
     
     # Returns board in text representation for printing in console
     def __str__(self):
