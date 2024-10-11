@@ -124,10 +124,28 @@ class Chess:
             or self.add_valid_position((position[0]+dy, position[1]-1), color, locations):
             attacker.add(position)
     
-    # Receives the location of a knights and its color, adds the valid attacks to locations
+    # Receives a location attacked by a pawn and its color, adds the valid locations from which the attack may have come to locations
+    # Note: also considers movement options, so technically not only attacked
+    def get_attacked_by_pawn(self, position : tuple, color : np.int8, locations : set):
+        if self.enpassant == position:
+            if self.valid_position((position[0], position[1]+1)) and self.state[(position[0], position[1]+1)] & Chess.PAWN and self.state[(position[0], position[1]+1)] & color: locations.add((position[0], position[1]+1))
+            if self.valid_position((position[0], position[1]-1)) and self.state[(position[0], position[1]-1)] & Chess.PAWN and self.state[(position[0], position[1]-1)] & color: locations.add((position[0], position[1]-1))
+        dy = -1 if color == Chess.WHITE else 1
+        if self.valid_position((position[0]+dy, position[1]+1)) and self.state[(position[0]+dy, position[1]+1)] & Chess.PAWN and self.state[(position[0]+dy, position[1]+1)] & color: locations.add((position[0]+dy, position[1]+1))
+        if self.valid_position((position[0]+dy, position[1]-1)) and self.state[(position[0]+dy, position[1]-1)] & Chess.PAWN and self.state[(position[0]+dy, position[1]-1)] & color: locations.add((position[0]+dy, position[1]-1))
+        if self.valid_position((position[0]+dy, position[1])) and self.state[(position[0]+dy, position[1])] & Chess.PAWN and self.state[(position[0]+dy, position[1])] & color: locations.add((position[0]+dy, position[1]))
+        if self.valid_position((position[0]+2*dy, position[1])) and self.state[(position[0]+2*dy, position[1])] & Chess.PAWN and self.state[(position[0]+2*dy, position[1])] & color: locations.add((position[0]+2*dy, position[1]))
+    
+    # Receives the location of a knight and its color, adds the valid attacks to locations
     def get_attack_knight(self, position : tuple, color : np.int8, locations : set, fixed : dict = dict(), attacker : set = set()):
         if any(self.add_valid_position((position[0] + npos[0], position[1] + npos[1]), color, locations) for npos in ((2,1), (2,-1), (-2, 1), (-2, -1), (1, 2), (-1, 2), (1, -2), (-1, -2))):
             attacker.add(position)
+            
+    # Receives a location attacked by a knight and its color, adds the valid locations from which the attack may have come to locations
+    def get_attacked_by_knight(self, position : tuple, color : np.int8, locations : set):
+        for dy,dx in ((2,1), (2,-1), (-2, 1), (-2, -1), (1, 2), (-1, 2), (1, -2), (-1, -2)):
+            npos = (position[0] + dy, position[1] + dx)
+            if self.valid_position(npos) and self.state[npos] & Chess.KNIGHT and self.state[npos] & color: locations.add(npos)
     
     # Receives a genexpr of positions, adds the valid ones including the first hit, continues to check if the piece hit is fixed or if it is a check
     def get_attack_pierce(self, position : tuple, color : np.int8, locations : set, fixed : dict, attacker : set, genexpr):
@@ -147,6 +165,13 @@ class Chess:
                         attacker.add(position)
                         break
     
+    # Receives a genexpr of positions, a position, the pieces color and a type of piece, adds the valid locations from which the attack may have come to locations
+    def get_attacked_by_pierce(self, position : tuple, color : np.int8, ptype : int, locations : set, genexpr):
+        for npos in genexpr:
+            if self.state[npos]:
+                if self.state[npos] & ptype and self.state[npos] & color: locations.add(npos)
+                break
+    
     # Receives the location of a bishop and its color, adds the valid attacks to locations, if any piece is fixed adds it to the fixed list
     def get_attack_bishop(self, position : tuple, color : np.int8, locations : set, fixed : dict = dict(), attacker : set = set()):
         self.get_attack_pierce(position, color, locations, fixed, attacker, ((position[0]-i, position[1]-i) for i in range(1, min(position)+1)))
@@ -154,18 +179,36 @@ class Chess:
         self.get_attack_pierce(position, color, locations, fixed, attacker, ((position[0]+i, position[1]-i) for i in range(1, min(7-position[0], position[1])+1)))
         self.get_attack_pierce(position, color, locations, fixed, attacker, ((position[0]+i, position[1]+i) for i in range(1, min(7-position[0], 7-position[1])+1)))
     
+    # Receives a location attacked by a bishop and its color, adds the valid locations from which the attack may have come to locations 
+    def get_attacked_by_bishop(self, position : tuple, color : np.int8, locations : set, ptype : int = BISHOP):
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((position[0]-i, position[1]-i) for i in range(1, min(position)+1)))
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((position[0]-i, position[1]+i) for i in range(1, min(position[0], 7-position[1])+1)))
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((position[0]+i, position[1]-i) for i in range(1, min(7-position[0], position[1])+1)))
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((position[0]+i, position[1]+i) for i in range(1, min(7-position[0], 7-position[1])+1)))
+    
     # Receives the location of a rook and its color, adds the valid attacks to locations, if any piece is fixed adds it to the fixed list
     def get_attack_rook(self, position : tuple, color : np.int8, locations : set, fixed : dict = dict(), attacker : set = set()):
         self.get_attack_pierce(position, color, locations, fixed, attacker, ((i, position[1]) for i in range(position[0]-1,-1,-1)))
         self.get_attack_pierce(position, color, locations, fixed, attacker, ((position[0], i) for i in range(position[1]-1,-1,-1)))
         self.get_attack_pierce(position, color, locations, fixed, attacker, ((i, position[1]) for i in range(position[0]+1, 8)))
         self.get_attack_pierce(position, color, locations, fixed, attacker, ((position[0], i) for i in range(position[1]+1, 8)))
+        
+    # Receives a location attacked by a rook and its color, adds the valid locations from which the attack may have come to locations 
+    def get_attacked_by_rook(self, position : tuple, color : np.int8, locations : set, ptype = ROOK):
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((i, position[1]) for i in range(position[0]-1,-1,-1)))
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((position[0], i) for i in range(position[1]-1,-1,-1)))
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((i, position[1]) for i in range(position[0]+1, 8)))
+        self.get_attacked_by_pierce(position, color, ptype, locations, ((position[0], i) for i in range(position[1]+1, 8)))
     
     # Receives the location of a queen and its color, adds the valid attacks to locations
     def get_attack_queen(self, position : tuple, color : np.int8, locations : set, fixed : dict = dict(), attacker : set = set()):
         self.get_attack_bishop(position, color, locations, fixed, attacker)
         self.get_attack_rook(position, color, locations, fixed, attacker)
 
+    # Receives a location attacked by a queen and its color, adds the valid locations from which the attack may have come to locations 
+    def get_attacked_by_queen(self, position : tuple, color : np.int8, locations : set):
+        self.get_attacked_by_bishop(position, color, locations, Chess.QUEEN)
+        self.get_attacked_by_rook(position, color, locations, Chess.QUEEN)
 
     # Receives the location of a king and its color, adds the valid attacks to locations
     def get_attack_king(self, position : tuple, color : np.int8, locations : set, fixed : dict = dict(), attacker : set = set()):
@@ -380,7 +423,20 @@ class Chess:
         npos = (numbers[-1], letters[-1])
         row, column = ((numbers[0] if len(numbers) > 1 else -1), (letters[0] if len(letters)>1 else -1))
         real_action = None
-        for pos in ((i,j) for i in range(8) for j in range(8)):
+        possible_locations = set()
+        if piece == Chess.PAWN:
+            self.get_attacked_by_pawn(npos, self.turn, possible_locations)
+        elif piece == Chess.KNIGHT:
+            self.get_attacked_by_knight(npos, self.turn, possible_locations)
+        elif piece == Chess.BISHOP:
+            self.get_attacked_by_bishop(npos, self.turn, possible_locations)
+        elif piece == Chess.ROOK:
+            self.get_attacked_by_rook(npos, self.turn, possible_locations)
+        elif piece == Chess.QUEEN:
+            self.get_attacked_by_queen(npos, self.turn, possible_locations)
+        else:
+            possible_locations.add(self.king)
+        for pos in possible_locations:
             if row != -1 and row != pos[0]: continue
             if column != -1 and column != pos[1]: continue
             if not (self.state[pos] & piece) or not (self.state[pos] & self.turn): continue
