@@ -11,10 +11,14 @@ import extract_info
 # Libraries
 import numpy as np
 import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
+
+# Fast access read-storage, recommended SSD (will only write once when creating caches, will read several Tbs of data)
+PATH = 'C:/Data/'
 
 # Randomness seed
 SEED = 777
@@ -24,6 +28,7 @@ VAL_TEST_SET = 0.1
 PRECOMP = 10000
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device_cpu = torch.device('cpu')
 
 # Loads the games and splits them into train, validation and test datasets
 def load_games(prng):
@@ -80,22 +85,24 @@ def load_cache(cache_name, prng, dataset, n_games, **kwargs):
     name = cache_name + '.cache'
     if os.path.exists(name):
         data = torch.load(name)
-        boards, states, results = data['boards'].to(torch.float32), data['states'].to(torch.float32), data['results'].to(torch.float32)
+        boards, states, results = data['boards'], data['states'], data['results']
     else:
         print("Building cache:", cache_name)
         boards, states, results = game_tensors(prng, dataset, n_games, **kwargs)
+        boards, states, results = boards.to(torch.uint8), states.to(torch.uint8), results.to(torch.uint8)
         torch.save({
-            'boards': boards.to(torch.uint8),
-            'states': states.to(torch.uint8),
-            'results': results.to(torch.uint8)
+            'boards': boards,
+            'states': states,
+            'results': results
         }, name)
     return boards, states, results
 
 def train_model():
-    EPOCHS = 100
-    NGAMES = 1000
-    CACHES = 50
-    MINIBATCHES = 500
+    # Estimated data usage per sample: (12*8*8 + 22 + 1)*4 = 3164 bytes/sample
+    EPOCHS = 20
+    CACHES = 50 # Splits the training data into CACHES files which will be read from storage
+    BATCH_LOAD_SIZE = 10000000 # Or aprox 8 Gbs if keeping them as uint8, divisible by BATCH_SIZE
+    BATCH_SIZE = 40000
     torch.manual_seed(SEED)
     model = CNN()
     prng = random.Random()
@@ -106,31 +113,55 @@ def train_model():
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     # Prepare datasets
     prng.seed(SEED)
-    # Load games
-    train, validation, test = load_games(prng)
-    # Prepare precomputed tensor caches (about 55 Gb, about 6-7 hours de compute)
-    N_per_cache = []
-    for c in range(CACHES):
-        from_idx = (c*len(train))//CACHES
-        to_idx = ((c+1)*len(train))//CACHES
-        _,_,results = load_cache(f'train{c}', prng, train[from_idx:to_idx], n_games=0, skip_first=5)
-        N_per_cache.append(results.shape[1])
-    N = sum(N_per_cache)
-    N_per_cache = np.cumsum(N_per_cache)
+    # Check if missing caches
+    missing = (not os.path.exists(f'{PATH}validation.cache')) or not os.path.exists(f'{PATH}sizes.cache') or any((not os.path.exists(f'{PATH}train{c}.cache')) for c in range(CACHES))
+    if missing:
+        # Load games
+        print("Loading games")
+        train, validation, test = load_games(prng)
+        # Prepare precomputed tensor caches (about 55 Gb, about 6-7 hours de compute)
+        N_per_cache = []
+        print("Pre-computing caches")
+        for c in range(CACHES):
+            from_idx = (c*len(train))//CACHES
+            to_idx = ((c+1)*len(train))//CACHES
+            _,_,results = load_cache(f'{PATH}train{c}', prng, train[from_idx:to_idx], n_games=0, skip_first=5)
+            N_per_cache.append(results.shape[0])
+            results = []
+        N = sum(N_per_cache)
+        N_per_cache = [0] + list(np.cumsum(N_per_cache))
+        torch.save({
+            'N': N,
+            'N_per_cache': np.array(N_per_cache),
+        }, f'{PATH}sizes.cache')
+    else:
+        train, validation, test = [],[],[]
+        data = torch.load(f'{PATH}sizes.cache')
+        N = data['N']
+        N_per_cache = list(data['N_per_cache'])
+    print("N-sample:", N)
+    print("N_per_cache:", N_per_cache)
     # Prepare validation cache (about 0.75 Gb, about 8 minutes to compute)
-    validation_boards, validation_states, validation_results = load_cache('validation', prng, validation, n_games=0, only_last = 10)
+    validation_boards, validation_states, validation_results = load_cache(f'{PATH}validation', prng, validation, n_games=0, only_last = 10)
+    # Have them ready: about 4 Gb to keep in memory
+    validation_boards, validation_states, validation_results = validation_boards.float(), validation_states.float(), validation_results.reshape((-1,1)).float()
     # Prepare everything else
     loss_fn = nn.BCELoss()
     i = 0
+    print("Starting training")
     while i < EPOCHS:
         # Minibatch training
         prng.seed(SEED*(i+1))
-        indices = prng.shuffle([i for i in range(N)])
+        indices = [i for i in range(N)]
+        prng.shuffle(indices)
         loss_epoch = 0
+        val_predicted_correctly = 0
         predicted_correctly = 0
-        for m in range(MINIBATCHES):
-            from_idx = (m*N)//MINIBATCHES
-            to_idx = ((m+1)*N)//MINIBATCHES
+        training_samples = 0
+        stime = time.time()
+        for m in range(N//BATCH_LOAD_SIZE):
+            from_idx = m * BATCH_LOAD_SIZE
+            to_idx = (m+1) * BATCH_LOAD_SIZE
             minibatch_indices = indices[from_idx : to_idx]
             # Load minibatch from files
             minibatch_indices.sort()
@@ -140,29 +171,50 @@ def train_model():
             minibatch_results = []
             for c in range(CACHES):
                 limit = mini_idx
-                while limit < len(minibatch_indices) and minibatch_indices[limit] < N_per_cache[c]:
+                while limit < len(minibatch_indices) and minibatch_indices[limit] < N_per_cache[c+1]:
                     limit += 1
                 if limit == mini_idx: continue
-                boards, states, results = load_cache(f'train{c}', prng, [], n_games=0, skip_first=5)
-                minibatch_boards.append(boards[minibatch_indices[mini_idx : limit]])
-                minibatch_states.append(states[minibatch_indices[mini_idx : limit]])
-                minibatch_results.append(results[minibatch_indices[mini_idx : limit]])
+                boards, states, results = load_cache(f'{PATH}train{c}', prng, [], n_games=0, skip_first=5)
+                adjusted_indices = [i - N_per_cache[c] for i in  minibatch_indices[mini_idx : limit]]
+                minibatch_boards.append(boards[adjusted_indices])
+                minibatch_states.append(states[adjusted_indices])
+                minibatch_results.append(results[adjusted_indices])
                 mini_idx = limit
+                # Deallocate
+                boards, states, results = None, None, None
             boards = torch.cat(minibatch_boards, dim=0)
             states = torch.cat(minibatch_states, dim=0)
             results = torch.cat(minibatch_results, dim=0)
-            # Train
-            model.zero_grad()
-            boards, states, results = boards.to(device=device), states.to(device=device), results.to(device=device)
-            predict = model(boards, states)
-            loss = loss_fn(predict, results)
-            loss.backward()
-            optimizer.step()
-            loss_epoch += loss.item()
-            predicted_correctly += torch.sum((predict >= 0.5) == results).item()
-        boards, states, results = None, None, None
-        # TODO: Calculate validation?
-        print(f"Loss at epoch {i}: {loss_epoch}, TA: {predicted_correctly/N}")
+            # Deallocate
+            minibatch_boards, minibatch_states, minibatch_results = None, None, None
+            for b in range(BATCH_LOAD_SIZE//BATCH_SIZE):
+                from_idx = b * BATCH_SIZE
+                to_idx = (b+1) * BATCH_SIZE
+                # Train
+                model.zero_grad()
+                mboards = boards[from_idx : to_idx].float()
+                mstates = states[from_idx : to_idx].float()
+                mresults = results[from_idx : to_idx].float()
+                mboards, mstates, mresults = mboards.to(device=device), mstates.to(device=device), mresults.to(device=device)
+                predict = model(mboards, mstates)
+                loss = loss_fn(predict, mresults)
+                loss.backward()
+                optimizer.step()
+                loss_epoch += loss.item()
+                predicted_correctly += torch.sum((predict >= 0.5) == mresults).item()
+                mboards, mstates, mresults = None, None, None
+            training_samples += BATCH_LOAD_SIZE
+        with torch.no_grad():
+            val_rand = [i for i in range(validation_results.shape[0])]
+            prng.shuffle(val_rand)
+            val_rand = val_rand[:BATCH_SIZE]
+            model = model.to(device_cpu)
+            model.eval()
+            predict = model(validation_boards[val_rand], validation_states[val_rand])
+            val_predicted_correctly = torch.sum((predict >= 0.5) == validation_results[val_rand]).item()
+            model = model.to(device)
+        model.train()
+        print(f"Loss at epoch {i}: {loss_epoch}, TA: {predicted_correctly/training_samples}, VA: {val_predicted_correctly/len(val_rand)} , Time-epoch: {time.time() - stime}")
         i += 1
     return model
 
