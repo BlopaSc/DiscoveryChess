@@ -104,7 +104,7 @@ def train_model():
     BATCH_LOAD_SIZE = 10000000 # Or aprox 8 Gbs if keeping them as uint8, divisible by BATCH_SIZE
     BATCH_SIZE = 40000
     torch.manual_seed(SEED)
-    model = CNN()
+    model = CNN(activation = 'lrelu')
     prng = random.Random()
     # Initiliaze model
     model.train()
@@ -148,6 +148,9 @@ def train_model():
     # Prepare everything else
     loss_fn = nn.BCELoss()
     i = 0
+    losses = []
+    t_accuracies = []
+    v_accuracies = []
     print("Starting training")
     while i < EPOCHS:
         # Minibatch training
@@ -205,17 +208,29 @@ def train_model():
                 mboards, mstates, mresults = None, None, None
             training_samples += BATCH_LOAD_SIZE
         with torch.no_grad():
-            val_rand = [i for i in range(validation_results.shape[0])]
-            prng.shuffle(val_rand)
-            val_rand = val_rand[:BATCH_SIZE]
+            val_indices = [i for i in range(validation_results.shape[0])]
             model = model.to(device_cpu)
+            val_predicted_correctly = 0
             model.eval()
-            predict = model(validation_boards[val_rand], validation_states[val_rand])
-            val_predicted_correctly = torch.sum((predict >= 0.5) == validation_results[val_rand]).item()
+            for from_idx in range(0, validation_results.shape[0], BATCH_SIZE):
+                to_idx = min(from_idx + BATCH_SIZE, validation_results.shape[0])
+                predict = model(validation_boards[val_indices[from_idx : to_idx]], validation_states[val_indices[from_idx : to_idx]])
+                val_predicted_correctly += torch.sum((predict >= 0.5) == validation_results[val_indices[from_idx : to_idx]]).item()
             model = model.to(device)
         model.train()
-        print(f"Loss at epoch {i}: {loss_epoch}, TA: {predicted_correctly/training_samples}, VA: {val_predicted_correctly/len(val_rand)} , Time-epoch: {time.time() - stime}")
+        losses.append(loss_epoch)
+        t_accuracies.append(predicted_correctly/training_samples)
+        v_accuracies.append(val_predicted_correctly/len(val_indices))
+        print(f"Loss at epoch {i}: {loss_epoch}, TA: {predicted_correctly/training_samples}, VA: {val_predicted_correctly/len(val_indices)} , Time-epoch: {time.time() - stime}")
         i += 1
+    torch.save({
+        'epoch': i,
+        'model': model.state_dict(),
+        'opt': optimizer.state_dict(),
+        'loss': losses,
+        't_acc': t_accuracies,
+        'v_acc': v_accuracies
+    }, 'DiscoveryChess_model_lrelu.pt')
     return model
 
 if __name__ == "__main__":
