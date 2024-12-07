@@ -43,11 +43,14 @@ class Chess:
             self.wking, self.bking = state.wking, state.bking
             self.turn = state.turn
             self.turn_counter = state.turn_counter
-            self.enpassant = state.enpasse
+            self.enpassant = state.enpassant
             self.last_update = 0
         else:
             self.state = np.zeros((8,8), dtype=np.int16)
             self.reset()
+    # Compares two game states to see if they are equal
+    def __eq__(self, other):
+        return np.all(self.state == other.state) and self.turn == other.turn and self.enpassant == other.enpassant
     
     # Resets the board:
     def reset(self):

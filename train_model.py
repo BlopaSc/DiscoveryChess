@@ -99,10 +99,10 @@ def load_cache(cache_name, prng, dataset, n_games, **kwargs):
 
 def train_model():
     # Estimated data usage per sample: (12*8*8 + 22 + 1)*4 = 3164 bytes/sample
-    EPOCHS = 20
+    EPOCHS = 25
     CACHES = 50 # Splits the training data into CACHES files which will be read from storage
     BATCH_LOAD_SIZE = 10000000 # Or aprox 8 Gbs if keeping them as uint8, divisible by BATCH_SIZE
-    BATCH_SIZE = 40000
+    BATCH_SIZE = 15625
     torch.manual_seed(SEED)
     model = CNN(activation = 'lrelu')
     prng = random.Random()
@@ -236,7 +236,5 @@ def train_model():
 if __name__ == "__main__":
     # Train model
     train_model()
-
-
 
 
